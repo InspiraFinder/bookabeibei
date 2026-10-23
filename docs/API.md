@@ -61,10 +61,10 @@ Authorization: Bearer <登录或注册返回的 token>
 `GET /api/config`（无需登录）
 
 ```json
-{ "cupMark": "茶", "now": 1792720800000 }
+{ "cups": [{ "id": "cup", "name": "杯杯", "mark": "" }], "now": 1792720800000 }
 ```
 
-`cupMark` 是主界面茶杯上的那个字，由部署者在 `wrangler.jsonc` 的 `vars.CUP_MARK` 中设定，只取第一个字符；留空（默认）时返回空字符串，表示杯子上不显示任何字。它属于部署配置，用户不能修改。
+`cups` 来自部署配置 `backend/cups.mjs`，第一只是默认杯杯。`name` 由部署者设置，`mark` 是杯子上的那个字，可能为空字符串。
 
 ## 修改自己的账号
 
@@ -84,15 +84,17 @@ Authorization: Bearer <登录或注册返回的 token>
 
 ## 获取看板
 
-`GET /api/schedule?date=2026-10-23`
+`GET /api/schedule?date=2026-10-23&cup=cup`
 
-`date` 按 UTC+8 解释，省略时默认服务端当前北京日期。响应包括：
+`cup` 是杯杯 id，省略时用 `backend/cups.mjs` 里的第一只。`date` 按 UTC+8 解释，省略时默认服务端当前北京日期。响应包括：
 
-- `now`、`date`、`member`、`rules`。
+- `now`、`date`、`member`、`rules`、`cup`（本次查询的杯杯对象）。
 - `current`：当前预约或 `null`，条件 `startMs <= now < endMs`。
 - `next`：下一条未来预约或 `null`，不局限于所选日期。
 - `bookings`：与所选北京日期相交的预约，按开始时间升序。
-- `mine`：当前用户未结束的预约，按开始时间升序。
+- `mine`：当前用户在这只杯杯上未结束的预约，按开始时间升序。
+
+杯杯不存在返回 `400`。每只杯杯的看板完全独立。
 
 预约对象：
 
@@ -101,6 +103,7 @@ Authorization: Bearer <登录或注册返回的 token>
   "id": "uuid",
   "memberId": "内部ID",
   "memberName": "小杯",
+  "cupId": "cup",
   "startMs": 1792720800000,
   "endMs": 1792722600000,
   "plannedEndMs": 1792722600000
@@ -114,14 +117,16 @@ Authorization: Bearer <登录或注册返回的 token>
 `POST /api/bookings`
 
 ```json
-{ "startAt": 1792720800000, "durationMinutes": 30 }
+{ "cup": "cup", "startAt": 1792720800000, "durationMinutes": 30 }
 ```
 
 立即使用：
 
 ```json
-{ "startAt": "now", "durationMinutes": 30 }
+{ "cup": "cup", "startAt": "now", "durationMinutes": 30 }
 ```
+
+`cup` 可省略，默认第一只杯杯。冲突判断与每人 3 单上限都在**同一只杯杯内**计算，不同杯杯的同一时段互不影响。
 
 成功为 `201`，响应 `{ "booking": { ... }, "now": 1792720800000 }`。
 

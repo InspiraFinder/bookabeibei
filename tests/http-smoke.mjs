@@ -31,6 +31,9 @@ try {
 
   const session = await send('/session');
   assert.equal(session.status, 200);
+  const config = await send('/config', null, 'GET');
+  assert.equal(config.status, 200);
+  assert.ok(Array.isArray(config.cups) && config.cups.length >= 1, '至少配置一只杯杯');
   const startAt = session.now + 45 * 60000;
   const attempts = await Promise.all(Array.from({ length: 8 }, () => send('/bookings', { startAt, durationMinutes: 30 })));
   for (const result of attempts) if (result.status === 201) created.push(result.booking.id);
@@ -39,6 +42,15 @@ try {
   const schedule = await send('/schedule');
   assert.ok(schedule.mine.some(b => b.id === created[0]));
   assert.equal(schedule.mine.find(b => b.id === created[0]).memberName, account);
+  if (config.cups[1]) {
+    // 同一时段在另一只杯杯上互不影响。
+    const other = await send('/bookings', { cup: config.cups[1].id, startAt, durationMinutes: 30 });
+    assert.equal(other.status, 201);
+    created.push(other.booking.id);
+    const otherBoard = await send(`/schedule?cup=${config.cups[1].id}`);
+    assert.ok(otherBoard.mine.some(b => b.id === other.booking.id));
+    assert.ok(!otherBoard.mine.some(b => b.id === created[0]), '看板按杯杯隔离');
+  }
   assert.equal((await send(`/bookings/${created[0]}/release`, null, 'POST')).status, 200);
   const immediate = await send('/bookings', { startAt: 'now', durationMinutes: 15 });
   assert.equal(immediate.status, 201); created.push(immediate.booking.id);
@@ -48,7 +60,7 @@ try {
   assert.equal((await send('/schedule')).current, null);
   assert.equal((await send('/logout', null, 'POST')).status, 200);
   assert.equal((await send('/session')).status, 401);
-  console.log('HTTP smoke passed: static assets + security headers + register/login + ID rename + 8 concurrent requests + schedule + cancel + immediate booking + early release + logout.');
+  console.log('HTTP smoke passed: static assets + security headers + register/login + ID rename + cup list + per-cup schedules + 8 concurrent requests + schedule + cancel + immediate booking + early release + logout.');
 } finally {
   for (const id of created) await send(`/bookings/${id}/release`, null, 'POST').catch(() => {});
 }

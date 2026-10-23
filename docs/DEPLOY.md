@@ -35,17 +35,21 @@ npx wrangler d1 migrations apply bookabeibei --remote
 
 此迁移会建立 members / sessions / bookings 表、索引、防重叠触发器。之后增加数据库变更应新建编号迁移文件，备份后再执行。
 
-### 自定义杯身上的字（可选）
+### 配置杯杯（可选）
 
-`wrangler.jsonc` 里的 `vars.CUP_MARK` 决定主界面那只茶杯上显示的字：
+`backend/cups.mjs` 是杯杯清单，决定有哪几只杯杯、叫什么、杯子上显示什么字：
 
-```jsonc
-"vars": { "CUP_MARK": "茶" }
+```js
+export const cups = Object.freeze([
+  Object.freeze({ id: 'cup', name: '杯杯', mark: '' }),
+]);
 ```
 
-- 留空（默认）就**不显示任何字**，杯子保持空白。
-- 只取第一个字符，写多了会被截断；改完重新 `npx wrangler deploy` 生效。
-- 这是部署者配置，群友在页面上改不了。本地 Node 模式用环境变量：`$env:CUP_MARK = "茶"`。
+- `name` 由部署者设置，例如改成 `一号杯杯`；`mark` 是杯子上的字，留空则不显示。
+- `id` 用于数据分组，**尽量别改**；改了这只杯杯的历史预约会失联。第一只是默认杯杯。
+- 加第二只杯杯就再写一行，每只杯杯的看板、冲突检查、每人 3 单上限都互相独立。
+- 改完重新 `npx wrangler deploy` 生效；不需要改数据库结构。
+- 页脚的「预约其他杯杯？」会打开杯杯列表，点击即可切换，列表底部是项目地址。
 
 ## 3. 群友注册（无需预先配置）
 

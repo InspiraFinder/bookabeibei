@@ -1,4 +1,5 @@
 import { hashPassword, hashToken, randomToken, verifyPassword, ITERATIONS } from './auth.mjs';
+import { cups } from './cups.mjs';
 
 export { hashToken } from './auth.mjs';
 
@@ -11,6 +12,25 @@ const ACCOUNT = Object.freeze({ min: 2, max: 32 });
 const PASSWORD = Object.freeze({ min: 8, max: 128 });
 const NAME = Object.freeze({ max: 20 });
 const THROTTLE = Object.freeze({ window: 10 * MINUTE, limit: 8 });
+
+// 杯杯列表来自 backend/cups.mjs。这里做一次宽松校验，配置写错时宁可少一只杯杯也不要出错。
+const cupList = Object.freeze((Array.isArray(cups) ? cups : [])
+  .map(cup => ({
+    id: String(cup?.id ?? '').trim().slice(0, 32),
+    name: String(cup?.name ?? '').trim().slice(0, NAME.max),
+    mark: [...String(cup?.mark ?? '').trim()][0] ?? '',
+  }))
+  .filter(cup => cup.id && cup.name && !/[\p{C}]/u.test(cup.id + cup.name + cup.mark))
+  .filter((cup, index, all) => all.findIndex(other => other.id === cup.id) === index));
+if (!cupList.length) throw new Error('backend/cups.mjs 至少要配置一只杯杯。');
+const cupIndex = new Map(cupList.map(cup => [cup.id, cup]));
+const defaultCup = cupList[0];
+
+function resolveCup(id) {
+  const cup = id ? cupIndex.get(String(id)) : defaultCup;
+  if (!cup) throw new HttpError(400, '没有找到这只杯杯。');
+  return cup;
+}
 
 class HttpError extends Error {
   constructor(status, message, code) { super(message); this.status = status; this.code = code; }
@@ -35,14 +55,6 @@ function nameProblem(name) {
   if (name.length > NAME.max) return `ID 最多 ${NAME.max} 个字符。`;
   if (/[\p{C}]/u.test(name)) return 'ID 包含无效字符。';
   return '';
-}
-
-// 杯身上的字属于部署配置：部署者在 wrangler.jsonc 的 vars.CUP_MARK 里填一个字符，
-// 留空则杯子上不显示任何字。这里只取第一个字符，避免配置写多。
-function cupMark(env) {
-  const raw = typeof env?.CUP_MARK === 'string' ? env.CUP_MARK.trim() : '';
-  const first = [...raw][0] ?? '';
-  return /[\p{C}]/u.test(first) ? '' : first;
 }
 
 // 每个 isolate 内的轻量限速：同一账号连续失败过多时短暂拒绝，避免在线暴力猜密码。
@@ -120,7 +132,7 @@ export function dayBounds(date) {
   return [start, start + DAY];
 }
 
-const fields = 'id, member_id AS memberId, start_ms AS startMs, end_ms AS endMs, planned_end_ms AS plannedEndMs';
+const fields = 'id, member_id AS memberId, cup_id AS cupId, start_ms AS startMs, end_ms AS endMs, planned_end_ms AS plannedEndMs';
 
 export async function handleApi(request, env, clock = Date.now) {
   const now = clock();
@@ -172,8 +184,8 @@ export async function handleApi(request, env, clock = Date.now) {
       return json({ token: await createSession(env.DB, row.id, now), member: { id: row.id, account: row.account, displayName: row.displayName }, now });
     }
 
-    // 公开配置：页面未登录时也要能拿到杯身上的字。
-    if (path === '/api/config' && request.method === 'GET') return json({ cupMark: cupMark(env), now });
+    // 公开配置：页面未登录时也要能拿到杯杯列表。
+    if (path === '/api/config' && request.method === 'GET') return json({ cups: cupList, now });
 
     const member = await authenticate(request, env.DB, now);
 
@@ -214,16 +226,17 @@ export async function handleApi(request, env, clock = Date.now) {
     }
 
     if (path === '/api/schedule' && request.method === 'GET') {
+      const cup = resolveCup(url.searchParams.get('cup'));
       const date = url.searchParams.get('date') || new Date(now + 8 * 3600000).toISOString().slice(0, 10);
       const [start, end] = dayBounds(date);
       if (start < now - 8 * DAY || start > now + 8 * DAY) throw new HttpError(400, '仅支持查看最近一周和未来一周。');
       // One query gives a coherent snapshot: selected day + current use + next use + own upcoming.
-      const { results } = await env.DB.prepare(`SELECT b.id, b.member_id AS memberId, b.start_ms AS startMs, b.end_ms AS endMs,
+      const { results } = await env.DB.prepare(`SELECT b.id, b.member_id AS memberId, b.cup_id AS cupId, b.start_ms AS startMs, b.end_ms AS endMs,
           b.planned_end_ms AS plannedEndMs, m.display_name AS memberName
         FROM bookings b JOIN members m ON m.id = b.member_id
-        WHERE b.cancelled_ms IS NULL AND b.end_ms > ? AND b.start_ms < ? ORDER BY b.start_ms`)
-        .bind(Math.min(start, now), Math.max(end, now + rules.advanceDays * DAY + rules.maxMinutes * MINUTE)).all();
-      return json({ now, date, rules, member,
+        WHERE b.cancelled_ms IS NULL AND b.cup_id = ? AND b.end_ms > ? AND b.start_ms < ? ORDER BY b.start_ms`)
+        .bind(cup.id, Math.min(start, now), Math.max(end, now + rules.advanceDays * DAY + rules.maxMinutes * MINUTE)).all();
+      return json({ now, date, rules, member, cup,
         current: results.find(b => b.startMs <= now && b.endMs > now) || null,
         next: results.find(b => b.startMs > now) || null,
         bookings: results.filter(b => b.startMs < end && b.endMs > start),
@@ -233,6 +246,7 @@ export async function handleApi(request, env, clock = Date.now) {
 
     if (path === '/api/bookings' && request.method === 'POST') {
       const body = await readBody(request);
+      const cup = resolveCup(body.cup);
       if (!Number.isInteger(body.durationMinutes) || body.durationMinutes < rules.minMinutes || body.durationMinutes > rules.maxMinutes || body.durationMinutes % rules.stepMinutes !== 0) {
         throw new HttpError(400, '单次预约为 15–120 分钟，时长须为 15 分钟的倍数。');
       }
@@ -240,9 +254,9 @@ export async function handleApi(request, env, clock = Date.now) {
       if (!Number.isSafeInteger(startMs) || startMs < now || startMs > now + rules.advanceDays * DAY) throw new HttpError(400, '请选择当前时间至未来 7 天内的开始时间。');
       const endMs = startMs + body.durationMinutes * MINUTE;
       const id = crypto.randomUUID();
-      await env.DB.prepare('INSERT INTO bookings (id, member_id, start_ms, end_ms, planned_end_ms, created_ms) VALUES (?, ?, ?, ?, ?, ?)')
-        .bind(id, member.id, startMs, endMs, endMs, now).run();
-      return json({ booking: { id, memberId: member.id, memberName: member.displayName, startMs, endMs, plannedEndMs: endMs }, now }, 201);
+      await env.DB.prepare('INSERT INTO bookings (id, member_id, cup_id, start_ms, end_ms, planned_end_ms, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(id, member.id, cup.id, startMs, endMs, endMs, now).run();
+      return json({ booking: { id, memberId: member.id, memberName: member.displayName, cupId: cup.id, startMs, endMs, plannedEndMs: endMs }, now }, 201);
     }
 
     const release = path.match(/^\/api\/bookings\/([a-zA-Z0-9-]{1,64})\/release$/);

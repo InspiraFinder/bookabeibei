@@ -11,7 +11,7 @@
 - 数据库触发器原子拦截重叠预约，覆盖同时提交、包含、部分交叉等情况；首尾相接允许预约。
 - 群友自助注册：特征码 1 是账号（全局唯一，不区分大小写），特征码 2 是密码；不再需要群主发放访问码。
 - 登录后可以随时修改自己的显示 ID 和密码；预约身份由服务端会话决定，不能在请求中冒用他人。
-- 主界面茶杯上的那个字由**部署者**配置（`wrangler.jsonc` 的 `vars.CUP_MARK`），默认为空，也就是杯子上不显示任何字。
+- 支持配置**多只杯杯**（`backend/cups.mjs`），每只有独立的预约看板、冲突检查和每人 3 单上限；页脚「预约其他杯杯？」会打开杯杯列表，点击即可切换，列表底部是项目地址。
 - 页面每 60 秒同步，可手动刷新，切回标签页时同步。超过 90 秒未成功同步时显示“状态待确认”。预约到点后自然结束，无需定时任务。
 - 桌面和手机布局、键盘操作、错误提示与操作确认。
 
@@ -23,6 +23,7 @@
 frontend/                前端：原生 HTML / CSS / JavaScript，无构建依赖
 backend/api.mjs          后端：共用业务与鉴权，基于标准 Request / Response
 backend/auth.mjs         密码哈希（PBKDF2-SHA256）与会话令牌
+backend/cups.mjs         杯杯列表配置：id、名称、杯子上的字
 backend/worker.mjs       Cloudflare Workers 入口
 backend/local.mjs        Node.js 本地 HTTP 入口，提供前端和 API
 backend/sqlite.mjs       本地 SQLite 与 D1 兼容适配，按文件名顺序执行迁移
@@ -59,7 +60,7 @@ node backend/local.mjs
 - **密码**（特征码 2）：至少 8 位。服务端只保存 PBKDF2-SHA256 加盐哈希，明文不落库。
 - 登录后在右上角账号窗口里可以把**显示 ID** 改成自己习惯的称呼（1–20 个字符，不能与他人重复），也可以改密码。
 
-主界面茶杯上的那个字属于部署配置，改 `wrangler.jsonc` 的 `vars.CUP_MARK`（见部署文档）；本地运行时用环境变量 `CUP_MARK`。
+杯杯的名称、杯子上的字、以及有哪几只杯杯，都属于部署配置，改 `backend/cups.mjs`（见下方「配置多只杯杯」）。
 
 登录成功后服务端发放会话令牌，保存在当前浏览器标签页，30 天有效；退出登录或改密码会让其他设备上的会话失效。数据保存在 `.data/booking.sqlite`，服务重启后仍保留。
 
@@ -105,7 +106,33 @@ node backend/export.mjs --format json --out D:\预约.json
 node backend/export.mjs                               # 本地 .data/booking.sqlite
 ```
 
-导出列为：预约ID、群友ID、账号、状态（待开始/使用中/已结束/已取消）、开始时间、结束时间、计划结束时间、实际时长、创建时间、取消时间，时间均为北京时间。`结束时间` 是实际释放的时刻，提前结束会早于 `计划结束时间`。**只导出预约与群友 ID，不包含密码哈希**；`--remote` 需要先 `npx wrangler login`。
+导出列为：预约ID、杯杯、群友ID、账号、状态（待开始/使用中/已结束/已取消）、开始时间、结束时间、计划结束时间、实际时长、创建时间、取消时间，时间均为北京时间。`结束时间` 是实际释放的时刻，提前结束会早于 `计划结束时间`。**只导出预约与群友 ID，不包含密码哈希**；`--remote` 需要先 `npx wrangler login`。
+
+## 配置多只杯杯
+
+`backend/cups.mjs` 就是杯杯清单，改完重新部署生效：
+
+```js
+export const cups = Object.freeze([
+  Object.freeze({ id: 'cup', name: '杯杯', mark: '' }),
+]);
+```
+
+- `name` 是显示名，由部署者决定；`mark` 是杯子上的字，留空则不显示。
+- `id` 用于数据分组，**尽量别改**；改了这只杯杯的历史预约会失联。
+- 第一只是默认杯杯。每只杯杯的看板、冲突检查、每人 3 单上限都各自独立。
+- 想加更多杯杯，照着复制一行：
+
+```js
+export const cups = Object.freeze([
+  Object.freeze({ id: 'cup-1', name: '一号杯杯', mark: '一' }),
+  Object.freeze({ id: 'cup-2', name: '二号杯杯', mark: '二' }),
+]);
+```
+
+- 新增杯杯不需要改数据库；减少杯杯后旧预约仍留在库里。
+- 老库升级到多杯杯时，`0003_cups.sql` 会把历史预约归到 `cup`；如果第一只杯杯用了别的 id，需要执行一次：
+  `npx wrangler d1 execute bookabeibei --remote --command "UPDATE bookings SET cup_id='你的id' WHERE cup_id='cup'"`
 
 ## 群主管理命令
 
@@ -131,7 +158,7 @@ npx wrangler d1 execute bookabeibei --remote --file members-disable.sql
 node --test tests/*.test.mjs
 ```
 
-测试覆盖注册与账号唯一性、登录与密码校验、失败次数限速、修改 ID 与密码、会话失效、禁止冒用身份、他人预约保护、重叠及相邻时段、3 单限制、取消与提前结束、到点释放、跨午夜、无效输入、跨域与体积限制、持久化、旧库升级迁移、数据导出，以及 **12 个独立线程同时抢一个时段**。前后端通过同一 `api.mjs` 执行业务。
+测试覆盖注册与账号唯一性、登录与密码校验、失败次数限速、修改 ID 与密码、会话失效、多杯杯隔离（看板 / 冲突 / 每人上限）、禁止冒用身份、他人预约保护、重叠及相邻时段、3 单限制、取消与提前结束、到点释放、跨午夜、无效输入、跨域与体积限制、持久化、旧库升级迁移、数据导出，以及 **12 个独立线程同时抢一个时段**。前后端通过同一 `api.mjs` 执行业务。
 
 ## 后续调整
 

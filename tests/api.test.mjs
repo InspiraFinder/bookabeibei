@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { handleApi, hashToken } from '../backend/api.mjs';
+import { cups } from '../backend/cups.mjs';
 import { hashPassword } from '../backend/auth.mjs';
 import { openDatabase } from '../backend/sqlite.mjs';
 
@@ -14,6 +15,7 @@ const DAY = 86_400_000;
 const ALICE = 'm-alice', BOB = 'm-bob';
 const aliceToken = 'a'.repeat(43), bobToken = 'b'.repeat(43);
 const PASSWORD = 'correct-horse-battery';
+const CUP_A = cups[0].id, CUP_B = cups[1]?.id;
 
 async function addMember(DB, { id, account, displayName = account, enabled = 1, password = PASSWORD }) {
   await DB.prepare('INSERT INTO members (id, account, password_hash, display_name, enabled, created_ms) VALUES (?, ?, ?, ?, ?, ?)')
@@ -23,7 +25,7 @@ async function addSession(DB, memberId, token, now = NOW) {
   await DB.prepare('INSERT INTO sessions (token_hash, member_id, created_ms, expires_ms) VALUES (?, ?, ?, ?)')
     .bind(await hashToken(token), memberId, now, now + 30 * DAY).run();
 }
-async function setup(t, filename = ':memory:', extraEnv = {}) {
+async function setup(t, filename = ':memory:') {
   const DB = openDatabase(filename); t.after(() => DB.close());
   await addMember(DB, { id: ALICE, account: 'Alice' });
   await addMember(DB, { id: BOB, account: 'Bob' });
@@ -33,7 +35,7 @@ async function setup(t, filename = ':memory:', extraEnv = {}) {
     const response = await handleApi(new Request(`http://localhost/api${path}`, {
       method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
       ...(body ? { body: JSON.stringify(body) } : {}),
-    }), { DB, ...extraEnv }, () => time);
+    }), { DB }, () => time);
     return { status: response.status, ...(await response.json()) };
   };
   return { DB, call };
@@ -96,22 +98,6 @@ test('users can rename their own ID and the new name is what everyone sees', asy
   assert.equal((await call('/account', { method: 'PATCH', body: { displayName: '   ' } })).status, 400);
 });
 
-test('the cup character is a deployment setting that defaults to nothing', async t => {
-  const plain = await setup(t);
-  assert.deepEqual((await plain.call('/config', { token: '' })).cupMark, '', '未配置时杯子不显示任何字');
-  assert.equal((await plain.call('/config', { token: '' })).status, 200, '未登录也能取配置');
-
-  const custom = await setup(t, ':memory:', { CUP_MARK: '茶' });
-  assert.equal((await custom.call('/config', { token: '' })).cupMark, '茶');
-
-  const emoji = await setup(t, ':memory:', { CUP_MARK: '😀' });
-  assert.equal((await emoji.call('/config', { token: '' })).cupMark, '😀');
-
-  // 只取第一个字符，容忍部署时多写或带空格。
-  const tooLong = await setup(t, ':memory:', { CUP_MARK: ' 两个 ' });
-  assert.equal((await tooLong.call('/config', { token: '' })).cupMark, '两');
-});
-
 test('changing the password needs the current one and revokes other sessions', async t => {
   const { call } = await setup(t);
   const otherDevice = await call('/login', { token: '', body: { account: 'Alice', password: PASSWORD } });
@@ -134,6 +120,41 @@ test('repeated wrong passwords are throttled per account', async t => {
   }
   assert.equal((await call('/login', { token: '', body: { account: 'Bob', password: PASSWORD } })).code, 'TOO_MANY_ATTEMPTS');
   assert.equal((await call('/login', { token: '', body: { account: 'Alice', password: PASSWORD } })).status, 200);
+});
+
+test('each cup keeps its own schedule, conflicts and three-booking limit', async t => {
+  const { call } = await setup(t);
+  const config = await call('/config', { token: '' });
+  assert.equal(config.status, 200, '未登录也能读取杯杯列表');
+  assert.deepEqual(config.cups.map(cup => cup.id), cups.map(cup => cup.id));
+  assert.equal(config.cups[0].name, cups[0].name);
+
+  const mine = await call('/bookings', { body: { cup: CUP_A, ...booking(NOW + 60 * MINUTE) } });
+  assert.equal(mine.status, 201);
+  assert.equal(mine.booking.cupId, CUP_A);
+
+  if (CUP_B) {
+    // 同一时段在另一只杯杯上互不影响。
+    assert.equal((await call('/bookings', { token: bobToken, body: { cup: CUP_B, ...booking(NOW + 60 * MINUTE) } })).status, 201);
+    // 同一只杯杯上仍然冲突。
+    assert.equal((await call('/bookings', { token: bobToken, body: { cup: CUP_A, ...booking(NOW + 60 * MINUTE) } })).code, 'BOOKING_CONFLICT');
+
+    // 看板按杯杯隔离，省略 cup 时用列表里的第一只。
+    assert.equal((await call('/schedule')).cup.id, CUP_A);
+    assert.equal((await call(`/schedule?cup=${CUP_A}`)).bookings.length, 1);
+    assert.equal((await call(`/schedule?cup=${CUP_B}`)).bookings.length, 1);
+  } else {
+    assert.equal((await call('/schedule')).cup.id, CUP_A);
+  }
+  assert.equal((await call('/schedule?cup=nope')).status, 400);
+  assert.equal((await call('/bookings', { body: { cup: 'nope', ...booking(NOW + 120 * MINUTE) } })).status, 400);
+
+  // 每人每只杯杯各自最多 3 单。
+  const created = [];
+  for (let i = 2; i <= 3; i++) created.push(await call('/bookings', { body: { cup: CUP_A, ...booking(NOW + i * 60 * MINUTE) } }));
+  assert.ok(created.every(result => result.status === 201));
+  assert.equal((await call('/bookings', { body: { cup: CUP_A, ...booking(NOW + 6 * 60 * MINUTE) } })).code, 'BOOKING_LIMIT');
+  if (CUP_B) assert.equal((await call('/bookings', { body: { cup: CUP_B, ...booking(NOW + 6 * 60 * MINUTE) } })).status, 201);
 });
 
 test('database prevents partial overlap, containment and equal intervals; adjacent intervals are allowed', async t => {

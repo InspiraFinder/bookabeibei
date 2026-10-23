@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDatabase } from './sqlite.mjs';
+import { cups } from './cups.mjs';
 
 const USAGE = `用法：node backend/export.mjs [--remote] [--out 文件] [--format csv|json] [--db 数据库名]
 
@@ -32,11 +33,15 @@ if (!['csv', 'json'].includes(format)) { console.error(USAGE); process.exit(1); 
 const remote = flag('remote');
 const databaseName = value('db') || 'bookabeibei';
 
-const QUERY = `SELECT b.id, b.member_id AS memberId, b.start_ms AS startMs, b.end_ms AS endMs,
+const QUERY = `SELECT b.id, b.cup_id AS cupId, b.member_id AS memberId, b.start_ms AS startMs, b.end_ms AS endMs,
   b.planned_end_ms AS plannedEndMs, b.created_ms AS createdMs, b.cancelled_ms AS cancelledMs,
   m.display_name AS memberName, m.account AS memberAccount, m.enabled AS memberEnabled
 FROM bookings b LEFT JOIN members m ON m.id = b.member_id
 ORDER BY b.start_ms`;
+
+// 杯杯名称来自部署配置 backend/cups.mjs，数据库里只存 cup_id。
+const cupName = new Map(cups.map(cup => [cup.id, cup.name]));
+const formatCup = booking => cupName.get(booking.cupId) ?? booking.cupId ?? '';
 
 function runRemote(command) {
   const wrangler = fileURLToPath(new URL('../node_modules/wrangler/bin/wrangler.js', import.meta.url));
@@ -79,11 +84,11 @@ const escapeCsv = text => {
   return /[",\r\n]/.test(cell) ? `"${cell.replaceAll('"', '""')}"` : cell;
 };
 
-const HEADERS = ['预约ID', '群友ID', '账号', '状态', '开始时间(北京)', '结束时间(北京)', '计划结束时间(北京)', '实际时长(分钟)', '创建时间(北京)', '取消时间(北京)'];
+const HEADERS = ['预约ID', '杯杯', '群友ID', '账号', '状态', '开始时间(北京)', '结束时间(北京)', '计划结束时间(北京)', '实际时长(分钟)', '创建时间(北京)', '取消时间(北京)'];
 
 function toRows(bookings, now) {
   return bookings.map(b => [
-    b.id, b.memberName ?? b.memberId, b.memberAccount ?? '', status(b, now),
+    b.id, formatCup(b), b.memberName ?? b.memberId, b.memberAccount ?? '', status(b, now),
     byBeijing(b.startMs), byBeijing(b.endMs), byBeijing(b.plannedEndMs),
     minutes(b.startMs, b.endMs), byBeijing(b.createdMs), byBeijing(b.cancelledMs),
   ]);

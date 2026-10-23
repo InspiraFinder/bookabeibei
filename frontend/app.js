@@ -2,7 +2,8 @@ const $ = id => document.getElementById(id);
 const MINUTE = 60_000;
 const DAY = 86_400_000;
 const storedToken = () => { try { return sessionStorage.getItem('jbb-token') || ''; } catch { return ''; } };
-const state = { token: storedToken(), member: null, data: null, date: dateKey(Date.now()), mode: 'later', offset: 0, syncedAt: 0, busy: false, refreshing: false, view: 'board', phase: '', cupMark: '' };
+const storedCup = () => { try { return sessionStorage.getItem('jbb-cup') || ''; } catch { return ''; } };
+const state = { token: storedToken(), member: null, data: null, cups: [], cupId: storedCup(), date: dateKey(Date.now()), mode: 'later', offset: 0, syncedAt: 0, busy: false, refreshing: false, view: 'board', phase: '' };
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false });
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: 'long', day: 'numeric' });
 const weekdayFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'short' });
@@ -13,6 +14,7 @@ function displayDate(time) { return dateFormat.format(time); }
 function fullTime(time) { return `${displayDate(time)} ${displayTime(time)}`; }
 function text(id, value) { $(id).textContent = value; }
 function saveToken(value) { state.token = value; try { value ? sessionStorage.setItem('jbb-token', value) : sessionStorage.removeItem('jbb-token'); } catch { /* In-memory login still works. */ } }
+function saveCup(id) { state.cupId = id; try { id ? sessionStorage.setItem('jbb-cup', id) : sessionStorage.removeItem('jbb-cup'); } catch { /* Ignore storage failures. */ } }
 function showError(id, message = '') { text(id, message); $(id).hidden = !message; }
 let toastTimer;
 function toast(message) { text('toast', message); $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 5000); }
@@ -31,11 +33,15 @@ async function api(path, options = {}, token = state.token) {
   return data;
 }
 
-// 部署配置：杯身上的字由部署者在 wrangler.jsonc 里设定，取不到就保持不显示。
-function loadConfig() {
-  api('/config', {}, '')
-    .then(data => { state.cupMark = data.cupMark || ''; text('cup-mark', state.cupMark); })
-    .catch(() => { /* 静态资源离线时不影响主流程 */ });
+function currentCup() { return state.cups.find(cup => cup.id === state.cupId) || state.cups[0] || null; }
+
+// 杯杯列表由部署者在 backend/cups.mjs 配置，未登录时也能读取。
+async function loadConfig() {
+  try {
+    const data = await api('/config', {}, '');
+    state.cups = Array.isArray(data.cups) ? data.cups : [];
+    if (!state.cups.some(cup => cup.id === state.cupId)) saveCup(state.cups[0]?.id || '');
+  } catch { /* 拿不到配置就沿用页面里的默认文案 */ }
 }
 
 function resetIdentity() {
@@ -59,9 +65,12 @@ function setAuthMode(mode) {
 function renderIdentity() {
   text('identity-label', state.member ? state.member.displayName : '登录 / 注册');
   text('identity-avatar', state.member ? Array.from(state.member.displayName)[0] : '群');
-  text('cup-mark', state.cupMark || '');
   text('mine-count', state.data?.mine.length || 0);
   text('submit-label', state.member ? (state.mode === 'now' ? '确认，现在使用' : '确认预约') : '登录后预约');
+  const cup = currentCup();
+  text('cup-mark', cup?.mark || '');
+  const index = state.cups.findIndex(item => item.id === cup?.id);
+  text('cup-label', cup ? `${cup.name} · ${String(index + 1).padStart(2, '0')}` : '杯杯 · 01');
 }
 
 function drawDates() {
@@ -99,16 +108,17 @@ function renderStatus() {
   const current = currentBooking();
   const stale = isStale();
   const ready = state.member && state.data;
+  const cupName = currentCup()?.name || '杯杯';
   $('status-pill').className = `status-pill${!ready || stale ? ' unknown' : current ? ' busy' : ''}`;
   text('status-label', !ready ? '等待登录' : stale ? '状态待确认' : current ? '预约使用中' : '现在空闲');
-  text('status-overline', !ready ? '欢迎来到群友预约室' : stale ? '上次同步的预约状态' : current ? '这一刻的杯杯，属于' : '下一段好时光，等你开启');
-  text('status-title', !ready ? '好时光，\n大家轮流享用。' : stale ? '稍等，正在重新连接。' : current ? current.memberName : '杯杯正在等你。');
+  text('status-overline', !ready ? '欢迎来到群友预约室' : stale ? '上次同步的预约状态' : current ? `这一刻的 ${cupName}，属于` : '下一段好时光，等你开启');
+  text('status-title', !ready ? '好时光，\n大家轮流享用。' : stale ? '稍等，正在重新连接。' : current ? current.memberName : `${cupName}正在等你。`);
   text('status-description', !ready ? '登录后，查看当前使用者和预约安排。' : stale ? '连接恢复后会自动更新，请以同步后的信息为准。' : current ? `还剩 ${Math.max(1, Math.ceil((current.endMs - now()) / MINUTE))} 分钟 · 预约到点自动释放` : '现在没有预约使用者，来约一段属于你的时间。');
   $('current-time').hidden = !current || stale;
   if (current) text('current-time', `${fullTime(current.startMs)} — ${dateKey(current.startMs) === dateKey(current.endMs) ? displayTime(current.endMs) : fullTime(current.endMs)}`);
-  text('status-action', !ready ? '登录或注册 ↗' : stale ? '重新同步 ↻' : current?.memberId === state.member.id ? '提前结束，释放时间 ↗' : current ? '预约下一段时间 ↗' : '现在使用杯杯 ↗');
+  text('status-action', !ready ? '登录或注册 ↗' : stale ? '重新同步 ↻' : current?.memberId === state.member.id ? '提前结束，释放时间 ↗' : current ? '预约下一段时间 ↗' : `现在使用 ${cupName} ↗`);
   const upcoming = state.data?.next;
-  text('next-label', ready && upcoming && upcoming.startMs > now() ? `下一位：${upcoming.memberName} · ${fullTime(upcoming.startMs)}` : '一个杯杯，每次只属于一位群友。');
+  text('next-label', ready && upcoming && upcoming.startMs > now() ? `下一位：${upcoming.memberName} · ${fullTime(upcoming.startMs)}` : '一只杯杯，每次只属于一位群友。');
   text('sync-label', !ready ? '登录后同步' : stale ? '等待重连' : '每分钟同步');
   $('usage-progress').hidden = !current || stale;
   if (current) $('usage-progress-bar').value = Math.max(0, Math.min(100, 100 * (now() - current.startMs) / (current.endMs - current.startMs)));
@@ -172,7 +182,7 @@ async function refresh() {
   const date = state.date;
   state.refreshing = true; $('refresh-button').disabled = true;
   try {
-    const data = await api(`/schedule?date=${date}`);
+    const data = await api(`/schedule?date=${date}&cup=${encodeURIComponent(state.cupId)}`);
     if (version !== requestVersion || token !== state.token || date !== state.date) return;
     state.data = data; state.member = data.member; state.syncedAt = Date.now();
     $('connection-banner').hidden = true;
@@ -215,7 +225,7 @@ $('booking-form').addEventListener('submit', async event => {
   if (state.mode !== 'now' && (!Number.isFinite(start) || start < now())) { showError('booking-error', '开始时间已过去，请选择一个稍晚的时间，或切换“现在使用”。'); return; }
   setBusy(true);
   try {
-    const data = await api('/bookings', { method: 'POST', body: JSON.stringify({ startAt: state.mode === 'now' ? 'now' : start, durationMinutes: Number($('duration').value) }) });
+    const data = await api('/bookings', { method: 'POST', body: JSON.stringify({ cup: state.cupId, startAt: state.mode === 'now' ? 'now' : start, durationMinutes: Number($('duration').value) }) });
     state.date = dateKey(data.booking.startMs); drawDates();
     toast(`预约成功：${fullTime(data.booking.startMs)} — ${displayTime(data.booking.endMs)}。`);
     await refresh();
@@ -297,6 +307,31 @@ $('password-form').addEventListener('submit', async event => {
   } catch (error) { showError('password-error', error.message); }
   finally { $('save-password').disabled = false; }
 });
+function renderCups() {
+  const list = $('cup-list'); list.replaceChildren();
+  if (!state.cups.length) { list.append(emptyState('暂时没有更多杯杯', '部署者可以在 backend/cups.mjs 里添加。')); return; }
+  for (const cup of state.cups) {
+    const item = document.createElement('li'); item.className = 'cup-item';
+    item.setAttribute('aria-current', String(cup.id === state.cupId));
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'cup-item-button';
+    const mini = document.createElement('span'); mini.className = 'cup-mini'; mini.setAttribute('aria-hidden', 'true'); mini.textContent = cup.mark || '';
+    const copy = document.createElement('span'); copy.className = 'cup-item-text';
+    const name = document.createElement('strong'); name.textContent = cup.name;
+    const hint = document.createElement('small'); hint.textContent = cup.id === state.cupId ? '当前正在看' : '切换过去';
+    copy.append(name, hint);
+    button.append(mini, copy);
+    button.addEventListener('click', () => {
+      $('cups-dialog').close();
+      if (cup.id === state.cupId) return;
+      saveCup(cup.id); state.data = null; state.syncedAt = 0;
+      render(); refresh();
+      toast(`已切到 ${cup.name}。`);
+    });
+    item.append(button); list.append(item);
+  }
+}
+$('cups-button').addEventListener('click', () => { renderCups(); $('cups-dialog').showModal(); });
+$('close-cups').addEventListener('click', () => $('cups-dialog').close());
 $('close-login').addEventListener('click', () => $('login-dialog').close());
 $('close-account').addEventListener('click', () => $('account-dialog').close());
 $('logout-button').addEventListener('click', async () => {
@@ -329,8 +364,7 @@ const initialStart = Math.ceil((now() + 5 * MINUTE) / (15 * MINUTE)) * 15 * MINU
 $('booking-date').value = dateKey(initialStart);
 $('booking-time').value = displayTime(initialStart);
 drawDates(); updateSummary(); render();
-loadConfig();
-if (state.token) refresh();
+loadConfig().then(() => { render(); if (state.token) refresh(); });
 setInterval(() => { if (!document.hidden && !state.refreshing) refresh(); }, 60000);
 setInterval(() => {
   if (document.hidden) return;
