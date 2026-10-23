@@ -1,0 +1,13 @@
+node_modules/
+.wrangler/
+.data/
+.dev.vars
+.env
+coverage/
+artifacts/
+exports/
+*.sqlite*
+members-*.sql
+# 本机私用文件
+姜杯杯*
+*.zip

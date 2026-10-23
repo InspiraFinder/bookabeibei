@@ -1,0 +1,18 @@
+{
+  "name": "bookabeibei",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node backend/local.mjs",
+    "dev": "node --watch backend/local.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "member": "node backend/members.mjs",
+    "export": "node backend/export.mjs",
+    "cf:dev": "wrangler dev",
+    "cf:migrate": "wrangler d1 migrations apply bookabeibei --remote",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": { "wrangler": "^4.0.0" }
+}
