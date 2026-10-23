@@ -62,6 +62,16 @@ function setAuthMode(mode) {
   $('password-input').setAttribute('autocomplete', registering ? 'new-password' : 'current-password');
   showError('login-error');
 }
+// 站点名跟着所选杯杯走：浏览器标签、顶栏、主标题、页脚。
+function applyCupCopy(cup) {
+  const name = cup?.name || '杯杯';
+  text('brand-name', name);
+  text('page-title', `给${name}，也给彼此一点时间。`);
+  text('footer-name', name);
+  document.title = `${name} · 群友预约室`;
+  const brand = document.querySelector('.brand');
+  if (brand) brand.setAttribute('aria-label', `${name}预约室首页`);
+}
 function renderIdentity() {
   text('identity-label', state.member ? state.member.displayName : '登录 / 注册');
   text('identity-avatar', state.member ? Array.from(state.member.displayName)[0] : '群');
@@ -71,6 +81,7 @@ function renderIdentity() {
   text('cup-mark', cup?.mark || '');
   const index = state.cups.findIndex(item => item.id === cup?.id);
   text('cup-label', cup ? `${cup.name} · ${String(index + 1).padStart(2, '0')}` : '杯杯 · 01');
+  applyCupCopy(cup);
 }
 
 function drawDates() {

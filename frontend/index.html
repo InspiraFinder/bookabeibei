@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f5ef">
-  <meta name="description" content="杯杯群友专属预约看板。看看谁在使用，预约属于你的时间。">
-  <title>杯杯 · 群友预约室</title>
+  <meta name="description" content="群友专属预约看板。看看谁在使用，预约属于你的时间。">
+  <title>姜杯杯 · 群友预约室</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" type="module"></script>
@@ -13,7 +13,7 @@
 <body>
   <div class="shell">
     <header class="header">
-      <a class="brand" href="/" aria-label="杯杯预约室首页"><img src="/favicon.svg" alt="" width="44" height="44"><span>杯杯<span class="brand-sub">群友预约室</span></span></a>
+      <a class="brand" href="/" aria-label="姜杯杯预约室首页"><img src="/favicon.svg" alt="" width="44" height="44"><span><span id="brand-name">姜杯杯</span><span class="brand-sub">群友预约室</span></span></a>
       <nav class="nav" aria-label="主导航">
         <button id="board-tab" class="nav-item selected" aria-pressed="true">预约看板</button>
         <button id="mine-tab" class="nav-item" aria-pressed="false">我的预约 <span id="mine-count" class="badge">0</span></button>
@@ -22,7 +22,7 @@
     </header>
 
     <main>
-      <div class="page-intro"><div><div class="eyebrow"><span class="tiny-dot"></span> ONE AT A TIME, GOOD TIMES FOR ALL</div><h1>给杯杯，也给彼此一点时间。</h1><p>看看谁在使用，约好你的下一段时光。</p></div><div class="today-pill"><span aria-hidden="true">◷</span><span id="today-label">北京时间</span></div></div>
+      <div class="page-intro"><div><div class="eyebrow"><span class="tiny-dot"></span> ONE AT A TIME, GOOD TIMES FOR ALL</div><h1 id="page-title">给姜杯杯，也给彼此一点时间。</h1><p>看看谁在使用，约好你的下一段时光。</p></div><div class="today-pill"><span aria-hidden="true">◷</span><span id="today-label">北京时间</span></div></div>
       <div id="connection-banner" class="connection-banner" role="status" hidden></div>
 
       <section id="mine-panel" class="mine-panel" hidden aria-labelledby="mine-title"><div class="section-heading"><div><span class="eyebrow">MY RESERVATIONS</span><h2 id="mine-title">留给你的时间</h2></div><span class="muted">取消预约后，时段会立即开放</span></div><div id="mine-list"></div></section>
@@ -30,8 +30,8 @@
       <div class="dashboard" id="board-panel">
         <div class="main-column">
           <section class="status-card" aria-labelledby="status-title">
-            <div class="status-top"><span class="status-pill" id="status-pill"><span class="tiny-dot"></span><span id="status-label">等待登录</span></span><span class="small-label" id="cup-label">杯杯 · 01</span></div>
-            <div class="status-content"><div class="status-copy"><p class="card-overline" id="status-overline">欢迎来到群友预约室</p><h2 id="status-title">好时光，<br>大家轮流享用。</h2><p id="status-description">登录后，查看当前使用者和预约安排。</p><div class="current-time" id="current-time" hidden></div><button class="status-action" id="status-action">登录后预约 <span aria-hidden="true">↗</span></button></div><div class="cup-scene" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><span class="spark spark-one">✳</span><span class="spark spark-two">✦</span><div class="steam"><i></i><i></i><i></i></div><div class="cup-handle"></div><div class="cup"><span class="cup-mark" id="cup-mark">杯</span><div class="cup-cheek left"></div><div class="cup-cheek right"></div></div><div class="saucer"></div><div class="cup-shadow"></div><div class="scene-caption">a little time, just for you.</div></div></div>
+            <div class="status-top"><span class="status-pill" id="status-pill"><span class="tiny-dot"></span><span id="status-label">等待登录</span></span><span class="small-label" id="cup-label">姜杯杯 · 01</span></div>
+            <div class="status-content"><div class="status-copy"><p class="card-overline" id="status-overline">欢迎来到群友预约室</p><h2 id="status-title">好时光，<br>大家轮流享用。</h2><p id="status-description">登录后，查看当前使用者和预约安排。</p><div class="current-time" id="current-time" hidden></div><button class="status-action" id="status-action">登录后预约 <span aria-hidden="true">↗</span></button></div><div class="cup-scene" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><span class="spark spark-one">✳</span><span class="spark spark-two">✦</span><div class="steam"><i></i><i></i><i></i></div><div class="cup-handle"></div><div class="cup"><span class="cup-mark" id="cup-mark">姜</span><div class="cup-cheek left"></div><div class="cup-cheek right"></div></div><div class="saucer"></div><div class="cup-shadow"></div><div class="scene-caption">a little time, just for you.</div></div></div>
             <div class="status-bottom"><span id="next-label">一只杯杯，每次只属于一位群友。</span><span class="live-indicator" id="live-indicator"><span class="tiny-dot"></span><span id="sync-label">登录后同步</span></span></div>
             <div class="usage-progress" id="usage-progress" hidden><progress id="usage-progress-bar" max="100" value="0" aria-label="当前预约进度"></progress></div>
           </section>
@@ -62,7 +62,7 @@
         </aside>
       </div>
     </main>
-    <footer><span>杯杯 <span class="footer-dot">/</span> 美好时间，共享有序。</span><button type="button" class="footer-link" id="cups-button" aria-haspopup="dialog">预约其他杯杯？<span aria-hidden="true">↗</span></button><span class="footer-note">MADE FOR OUR LITTLE COMMUNITY <span aria-hidden="true">✦</span></span></footer>
+    <footer><span><span id="footer-name">姜杯杯</span> <span class="footer-dot">/</span> 美好时间，共享有序。</span><button type="button" class="footer-link" id="cups-button" aria-haspopup="dialog">预约其他杯杯？<span aria-hidden="true">↗</span></button><span class="footer-note">MADE FOR OUR LITTLE COMMUNITY <span aria-hidden="true">✦</span></span></footer>
   </div>
 
   <dialog id="cups-dialog" class="dialog cups-dialog"><div class="dialog-top"><span class="eyebrow">ALL THE CUPS</span><button type="button" class="close-button" id="close-cups" aria-label="关闭杯杯列表">×</button></div><h2>预约其他杯杯？</h2><p>这里能约到的每一只杯杯，点一只就切过去。</p><ul class="cup-list" id="cup-list"></ul><a class="cup-project" href="https://github.com/InspiraFinder/bookabeibei" target="_blank" rel="noopener noreferrer"><span>也想有自己的杯杯？</span><strong>项目地址 ↗</strong></a></dialog>
