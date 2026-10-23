@@ -22,7 +22,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/')) {
       const init = { method: req.method, headers: req.headers };
       if (!['GET', 'HEAD'].includes(req.method)) { init.body = req; init.duplex = 'half'; }
-      const response = await handleApi(new Request(url, init), { DB });
+      const response = await handleApi(new Request(url, init), { DB, CUP_MARK: process.env.CUP_MARK || '' });
       res.writeHead(response.status, { ...Object.fromEntries(response.headers), ...securityHeaders });
       res.end(Buffer.from(await response.arrayBuffer()));
       return;

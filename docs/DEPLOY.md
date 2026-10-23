@@ -35,6 +35,18 @@ npx wrangler d1 migrations apply bookabeibei --remote
 
 此迁移会建立 members / sessions / bookings 表、索引、防重叠触发器。之后增加数据库变更应新建编号迁移文件，备份后再执行。
 
+### 自定义杯身上的字（可选）
+
+`wrangler.jsonc` 里的 `vars.CUP_MARK` 决定主界面那只茶杯上显示的字：
+
+```jsonc
+"vars": { "CUP_MARK": "茶" }
+```
+
+- 留空（默认）就**不显示任何字**，杯子保持空白。
+- 只取第一个字符，写多了会被截断；改完重新 `npx wrangler deploy` 生效。
+- 这是部署者配置，群友在页面上改不了。本地 Node 模式用环境变量：`$env:CUP_MARK = "茶"`。
+
 ## 3. 群友注册（无需预先配置）
 
 注册由群友自己在网页完成，群主不需要发放任何凭证。部署完成后把链接发到群里，各自点击右上角「登录 / 注册」→「注册」，填写：

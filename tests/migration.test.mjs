@@ -36,7 +36,7 @@ test('upgrading an access-code database keeps booking history and retires unused
   const trigger = await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'bookings_no_overlap_insert'").bind().first();
   assert.match(trigger.sql, /BOOKING_CONFLICT/);
   assert.deepEqual((await db.prepare('SELECT name FROM schema_migrations ORDER BY name').bind().all()).results.map(row => row.name),
-    ['0001_init.sql', '0002_accounts.sql', '0003_cup_mark.sql']);
+    ['0001_init.sql', '0002_accounts.sql']);
   db.close();
 
   // 再次打开不会重复执行迁移。

@@ -23,7 +23,7 @@ async function addSession(DB, memberId, token, now = NOW) {
   await DB.prepare('INSERT INTO sessions (token_hash, member_id, created_ms, expires_ms) VALUES (?, ?, ?, ?)')
     .bind(await hashToken(token), memberId, now, now + 30 * DAY).run();
 }
-async function setup(t, filename = ':memory:') {
+async function setup(t, filename = ':memory:', extraEnv = {}) {
   const DB = openDatabase(filename); t.after(() => DB.close());
   await addMember(DB, { id: ALICE, account: 'Alice' });
   await addMember(DB, { id: BOB, account: 'Bob' });
@@ -33,7 +33,7 @@ async function setup(t, filename = ':memory:') {
     const response = await handleApi(new Request(`http://localhost/api${path}`, {
       method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
       ...(body ? { body: JSON.stringify(body) } : {}),
-    }), { DB }, () => time);
+    }), { DB, ...extraEnv }, () => time);
     return { status: response.status, ...(await response.json()) };
   };
   return { DB, call };
@@ -96,20 +96,20 @@ test('users can rename their own ID and the new name is what everyone sees', asy
   assert.equal((await call('/account', { method: 'PATCH', body: { displayName: '   ' } })).status, 400);
 });
 
-test('the cup character is optional, per user, and limited to one character', async t => {
-  const { call } = await setup(t);
-  assert.equal((await call('/session')).member.cupMark, null, '默认不显示任何字');
+test('the cup character is a deployment setting that defaults to nothing', async t => {
+  const plain = await setup(t);
+  assert.deepEqual((await plain.call('/config', { token: '' })).cupMark, '', '未配置时杯子不显示任何字');
+  assert.equal((await plain.call('/config', { token: '' })).status, 200, '未登录也能取配置');
 
-  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: '杯' } })).member.cupMark, '杯');
-  assert.equal((await call('/session')).member.cupMark, '杯');
-  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: '😀' } })).member.cupMark, '😀', 'emoji 也算一个字');
+  const custom = await setup(t, ':memory:', { CUP_MARK: '茶' });
+  assert.equal((await custom.call('/config', { token: '' })).cupMark, '茶');
 
-  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: '两个字' } })).status, 400);
-  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: 123 } })).status, 400);
+  const emoji = await setup(t, ':memory:', { CUP_MARK: '😀' });
+  assert.equal((await emoji.call('/config', { token: '' })).cupMark, '😀');
 
-  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: '' } })).member.cupMark, null, '留空即清空');
-  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: '茶' } })).status, 200);
-  assert.equal((await call('/session', { token: bobToken })).member.cupMark, null, '不影响其他群友');
+  // 只取第一个字符，容忍部署时多写或带空格。
+  const tooLong = await setup(t, ':memory:', { CUP_MARK: ' 两个 ' });
+  assert.equal((await tooLong.call('/config', { token: '' })).cupMark, '两');
 });
 
 test('changing the password needs the current one and revokes other sessions', async t => {

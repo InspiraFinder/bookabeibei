@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const MINUTE = 60_000;
 const DAY = 86_400_000;
 const storedToken = () => { try { return sessionStorage.getItem('jbb-token') || ''; } catch { return ''; } };
-const state = { token: storedToken(), member: null, data: null, date: dateKey(Date.now()), mode: 'later', offset: 0, syncedAt: 0, busy: false, refreshing: false, view: 'board', phase: '' };
+const state = { token: storedToken(), member: null, data: null, date: dateKey(Date.now()), mode: 'later', offset: 0, syncedAt: 0, busy: false, refreshing: false, view: 'board', phase: '', cupMark: '' };
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false });
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: 'long', day: 'numeric' });
 const weekdayFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'short' });
@@ -31,6 +31,13 @@ async function api(path, options = {}, token = state.token) {
   return data;
 }
 
+// 部署配置：杯身上的字由部署者在 wrangler.jsonc 里设定，取不到就保持不显示。
+function loadConfig() {
+  api('/config', {}, '')
+    .then(data => { state.cupMark = data.cupMark || ''; text('cup-mark', state.cupMark); })
+    .catch(() => { /* 静态资源离线时不影响主流程 */ });
+}
+
 function resetIdentity() {
   saveToken(''); state.member = null; state.data = null; state.syncedAt = 0; state.phase = '';
   $('connection-banner').hidden = true;
@@ -52,7 +59,7 @@ function setAuthMode(mode) {
 function renderIdentity() {
   text('identity-label', state.member ? state.member.displayName : '登录 / 注册');
   text('identity-avatar', state.member ? Array.from(state.member.displayName)[0] : '群');
-  text('cup-mark', state.member?.cupMark || '');
+  text('cup-mark', state.cupMark || '');
   text('mine-count', state.data?.mine.length || 0);
   text('submit-label', state.member ? (state.mode === 'now' ? '确认，现在使用' : '确认预约') : '登录后预约');
 }
@@ -259,9 +266,8 @@ $('identity-button').addEventListener('click', () => {
   if (!state.member) { openLogin(); return; }
   text('account-name', state.member.account);
   $('display-name').value = state.member.displayName;
-  $('cup-input').value = state.member.cupMark || '';
   $('current-password').value = ''; $('new-password').value = '';
-  showError('id-error'); showError('cup-error'); showError('password-error');
+  showError('id-error'); showError('password-error');
   $('account-dialog').showModal();
 });
 $('id-form').addEventListener('submit', async event => {
@@ -277,18 +283,6 @@ $('id-form').addEventListener('submit', async event => {
     toast(`ID 已更新为 ${data.member.displayName}。`);
   } catch (error) { showError('id-error', error.message); }
   finally { $('save-id').disabled = false; }
-});
-$('cup-form').addEventListener('submit', async event => {
-  event.preventDefault();
-  const cupMark = $('cup-input').value.trim();
-  if ([...cupMark].length > 1) { showError('cup-error', '杯身上最多只能放一个字。'); return; }
-  $('save-cup').disabled = true; showError('cup-error');
-  try {
-    const data = await api('/account', { method: 'PATCH', body: JSON.stringify({ cupMark }) });
-    state.member = data.member; render();
-    toast(cupMark ? `杯子上现在写着「${cupMark}」。` : '杯子上的字已清空。');
-  } catch (error) { showError('cup-error', error.message); }
-  finally { $('save-cup').disabled = false; }
 });
 $('password-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -335,6 +329,7 @@ const initialStart = Math.ceil((now() + 5 * MINUTE) / (15 * MINUTE)) * 15 * MINU
 $('booking-date').value = dateKey(initialStart);
 $('booking-time').value = displayTime(initialStart);
 drawDates(); updateSummary(); render();
+loadConfig();
 if (state.token) refresh();
 setInterval(() => { if (!document.hidden && !state.refreshing) refresh(); }, 60000);
 setInterval(() => {
