@@ -36,6 +36,13 @@ function nameProblem(name) {
   if (/[\p{C}]/u.test(name)) return 'ID 包含无效字符。';
   return '';
 }
+// 杯身上的字：最多一个字符（按码点算，emoji 也算一个），空字符串表示不显示。
+function cupMarkProblem(mark) {
+  if (typeof mark !== 'string') return '杯身上的字必须是文字。';
+  if ([...mark].length > 1) return '杯身上最多只能放一个字。';
+  if (/[\p{C}]/u.test(mark)) return '这个字不可用。';
+  return '';
+}
 
 // 每个 isolate 内的轻量限速：同一账号连续失败过多时短暂拒绝，避免在线暴力猜密码。
 const failures = new Map();
@@ -58,7 +65,7 @@ function recordFailure(account, now) {
 }
 
 async function findMemberByAccount(db, account) {
-  return db.prepare('SELECT id, account, display_name AS displayName, password_hash AS passwordHash, enabled FROM members WHERE account = ?')
+  return db.prepare('SELECT id, account, display_name AS displayName, cup_mark AS cupMark, password_hash AS passwordHash, enabled FROM members WHERE account = ?')
     .bind(account).first();
 }
 
@@ -72,13 +79,13 @@ async function createSession(db, memberId, now) {
 async function authenticate(request, db, now) {
   const token = bearer(request);
   if (!token) throw new HttpError(401, '请先登录后再操作。');
-  const member = await db.prepare(`SELECT m.id, m.account, m.display_name AS displayName, m.enabled
+  const member = await db.prepare(`SELECT m.id, m.account, m.display_name AS displayName, m.cup_mark AS cupMark, m.enabled
     FROM sessions s JOIN members m ON m.id = s.member_id
     WHERE s.token_hash = ? AND s.expires_ms > ?`)
     .bind(await hashToken(token), now).first();
   if (!member) throw new HttpError(401, '登录已失效，请重新登录。');
   if (!member.enabled) throw new HttpError(401, '该账号已被停用，请联系群主。');
-  return { id: member.id, account: member.account, displayName: member.displayName };
+  return { id: member.id, account: member.account, displayName: member.displayName, cupMark: member.cupMark ?? null };
 }
 
 async function readBody(request) {
@@ -140,7 +147,7 @@ export async function handleApi(request, env, clock = Date.now) {
         if (detail.includes('members.display_name')) throw new HttpError(409, '这个账号名对应的 ID 已被他人使用，请换一个账号名。', 'NAME_TAKEN');
         throw error;
       }
-      return json({ token: await createSession(env.DB, id, now), member: { id, account, displayName: account }, now }, 201);
+      return json({ token: await createSession(env.DB, id, now), member: { id, account, displayName: account, cupMark: null }, now }, 201);
     }
 
     if (path === '/api/login' && request.method === 'POST') {
@@ -161,7 +168,7 @@ export async function handleApi(request, env, clock = Date.now) {
         await env.DB.prepare('UPDATE members SET password_hash = ? WHERE id = ?').bind(await hashPassword(password), row.id).run();
       }
       await env.DB.prepare('DELETE FROM sessions WHERE expires_ms <= ?').bind(now).run();
-      return json({ token: await createSession(env.DB, row.id, now), member: { id: row.id, account: row.account, displayName: row.displayName }, now });
+      return json({ token: await createSession(env.DB, row.id, now), member: { id: row.id, account: row.account, displayName: row.displayName, cupMark: row.cupMark ?? null }, now });
     }
 
     const member = await authenticate(request, env.DB, now);
@@ -186,6 +193,14 @@ export async function handleApi(request, env, clock = Date.now) {
           throw error;
         }
         member.displayName = displayName;
+      }
+      if (body.cupMark !== undefined) {
+        if (typeof body.cupMark !== 'string') throw new HttpError(400, '杯身上的字必须是文字。');
+        const cupMark = cleanText(body.cupMark);
+        const problem = cupMarkProblem(cupMark);
+        if (problem) throw new HttpError(400, problem);
+        await env.DB.prepare('UPDATE members SET cup_mark = ? WHERE id = ?').bind(cupMark || null, member.id).run();
+        member.cupMark = cupMark || null;
       }
       if (body.newPassword !== undefined) {
         const problem = passwordProblem(body.newPassword);

@@ -23,7 +23,7 @@ Authorization: Bearer <登录或注册返回的 token>
 成功返回 `201`：
 
 ```json
-{ "token": "…", "member": { "id": "内部ID", "account": "特征码1", "displayName": "特征码1" }, "now": 1792720800000 }
+{ "token": "…", "member": { "id": "内部ID", "account": "特征码1", "displayName": "特征码1", "cupMark": null }, "now": 1792720800000 }
 ```
 
 账号已存在返回 `409 ACCOUNT_TAKEN`。
@@ -48,13 +48,13 @@ Authorization: Bearer <登录或注册返回的 token>
 
 ```json
 {
-  "member": { "id": "内部ID", "account": "特征码1", "displayName": "小杯" },
+  "member": { "id": "内部ID", "account": "特征码1", "displayName": "小杯", "cupMark": "茶" },
   "rules": { "minMinutes": 15, "maxMinutes": 120, "stepMinutes": 15, "maxBookings": 3, "advanceDays": 7, "timezone": "Asia/Shanghai", "pollSeconds": 60 },
   "now": 1792720800000
 }
 ```
 
-`id` 是内部不可变标识，`displayName` 是其他群友看到的 ID。所有时间戳使用 Unix **毫秒**，以服务端时钟为准；前端显示北京时间，并通过 `now` 校准显示时钟。
+`id` 是内部不可变标识，`displayName` 是其他群友看到的 ID，`cupMark` 是主界面茶杯上的那个字（可为 `null`）。所有时间戳使用 Unix **毫秒**，以服务端时钟为准；前端显示北京时间，并通过 `now` 校准显示时钟。
 
 ## 修改自己的账号
 
@@ -67,10 +67,16 @@ Authorization: Bearer <登录或注册返回的 token>
 修改显示 ID：1–20 个字符，不能与他人重复，返回 `409 NAME_TAKEN` 表示被占用。
 
 ```json
+{ "cupMark": "茶" }
+```
+
+杯身上显示的一个字：**最多一个字符**（按码点算，emoji 也算一个），默认为 `null` 表示杯子上什么都不显示。传空字符串或不传即清空。每人的值互不影响，只有本人能看到自己的那个字。
+
+```json
 { "currentPassword": "旧密码", "newPassword": "新密码" }
 ```
 
-修改密码：必须提供正确的当前密码，否则返回 `403 WRONG_PASSWORD`。改密成功后，除当前会话外的其他登录全部失效。两个字段可以在同一次请求中一起提交。
+修改密码：必须提供正确的当前密码，否则返回 `403 WRONG_PASSWORD`。改密成功后，除当前会话外的其他登录全部失效。以上字段可以在同一次请求中一起提交。
 
 ## 获取看板
 

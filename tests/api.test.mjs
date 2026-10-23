@@ -96,6 +96,22 @@ test('users can rename their own ID and the new name is what everyone sees', asy
   assert.equal((await call('/account', { method: 'PATCH', body: { displayName: '   ' } })).status, 400);
 });
 
+test('the cup character is optional, per user, and limited to one character', async t => {
+  const { call } = await setup(t);
+  assert.equal((await call('/session')).member.cupMark, null, '默认不显示任何字');
+
+  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: '杯' } })).member.cupMark, '杯');
+  assert.equal((await call('/session')).member.cupMark, '杯');
+  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: '😀' } })).member.cupMark, '😀', 'emoji 也算一个字');
+
+  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: '两个字' } })).status, 400);
+  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: 123 } })).status, 400);
+
+  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: '' } })).member.cupMark, null, '留空即清空');
+  assert.equal((await call('/account', { method: 'PATCH', body: { cupMark: '茶' } })).status, 200);
+  assert.equal((await call('/session', { token: bobToken })).member.cupMark, null, '不影响其他群友');
+});
+
 test('changing the password needs the current one and revokes other sessions', async t => {
   const { call } = await setup(t);
   const otherDevice = await call('/login', { token: '', body: { account: 'Alice', password: PASSWORD } });
